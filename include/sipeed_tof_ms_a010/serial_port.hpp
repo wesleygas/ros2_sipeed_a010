@@ -26,6 +26,7 @@ private:
   bool configure_port();
   std::vector<uint8_t> read_bytes() const;
   void write_bytes(const std::vector<uint8_t> & data) const;
+  void drain();
 
   std::string dev_path_;
   int fd_ = -1;

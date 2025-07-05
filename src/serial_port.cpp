@@ -39,7 +39,7 @@ static bool serial_setup(int serial_port, unsigned int baudrate)
   tty.c_oflag &= ~OPOST;
   tty.c_oflag &= ~ONLCR;
   tty.c_cc[VMIN] = 0;
-  tty.c_cc[VTIME] = 1; // 100ms timeout
+  tty.c_cc[VTIME] = 5; // 100ms timeout
 
   cfsetspeed(&tty, baudrate);
 
@@ -92,6 +92,11 @@ std::string SerialPort::read_string()
   return std::string(bytes.begin(), bytes.end());
 }
 
+void SerialPort::drain()
+{
+    tcflush(fd_, TCIFLUSH); // Discard all data received but not read
+}
+
 std::vector<uint8_t> SerialPort::read_bytes() const
 {
   uint8_t read_buf[2048];
@@ -110,19 +115,20 @@ void SerialPort::write_bytes(const std::vector<uint8_t> & data) const
 
 bool SerialPort::send_command(const std::string & command, const std::string & expected_response, int timeout_ms)
 {
-    write_string(command);
-    auto start_time = std::chrono::steady_clock::now();
-    std::string response;
-    while (std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time).count() < timeout_ms)
-    {
-        response += read_string();
-        if (response.find(expected_response) != std::string::npos)
-        {
-            return true;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
-    return false;
+  drain();
+  write_string(command);
+  auto start_time = std::chrono::steady_clock::now();
+  std::string response;
+  while (std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time).count() < timeout_ms)
+  {
+      response += read_string();
+      if (response.find(expected_response) != std::string::npos)
+      {
+          return true;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  return false;
 }
 
 } // namespace sipeed_tof

@@ -18,6 +18,29 @@ namespace sipeed_tof
 class TofNode : public rclcpp::Node
 {
 public:
+  ~TofNode()
+  {
+    // 1. Signal the reading thread to stop.
+    is_running_ = false;
+
+    // 2. Send the command to the camera to stop streaming.
+    if (serial_port_ && serial_port_->is_open()) {
+      RCLCPP_INFO(this->get_logger(), "Stopping camera data stream...");
+      // We don't need to wait for a response, just send the command.
+      serial_port_->write_string("AT+DISP=1\r");
+      // Give it a moment to process
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+
+    // 3. Join the reading thread to ensure it has exited cleanly.
+    if (read_thread_.joinable()) {
+      read_thread_.join();
+    }
+
+    // 4. The SerialPort destructor will be called automatically, closing the port.
+    RCLCPP_INFO(this->get_logger(), "TofNode shut down cleanly.");
+  }
+
   TofNode() : Node("sipeed_tof_node")
   {
     // Declare parameters
@@ -41,12 +64,35 @@ public:
       return;
     }
 
-    // Start the main timer
+    // *** START THE DEDICATED READING THREAD ***
+    read_thread_ = std::thread(&TofNode::serial_read_loop, this);
+
+    // The timer now only processes data, it doesn't read it.
     timer_ = this->create_wall_timer(timer_period, std::bind(&TofNode::timer_callback, this));
     RCLCPP_INFO(this->get_logger(), "Sipeed ToF camera node started successfully.");
   }
 
 private:
+  std::thread read_thread_;
+  std::atomic<bool> is_running_{true};
+  std::mutex buffer_mutex_; // To protect the frame_parser_'s internal buffer
+  
+  // New method to be run in the dedicated thread
+  void serial_read_loop()
+  {
+    while (is_running_) {
+      // This call will block, but it's in its own thread, so it's safe.
+      std::string new_data = serial_port_->read_string();
+
+      if (!new_data.empty()) {
+        // Lock the mutex before accessing the shared frame_parser_
+        std::lock_guard<std::mutex> lock(buffer_mutex_);
+        frame_parser_.add_data(new_data);
+      }
+    }
+  }
+
+
   bool initialize_camera()
   {
     try {
@@ -117,9 +163,17 @@ private:
 
   void timer_callback()
   {
-    frame_parser_.add_data(serial_port_->read_string());
+    std::string new_data = serial_port_->read_string();
+
+    if (!new_data.empty()) {
+      // Log the size of the data chunk we received. This tells us if the port is alive.
+      // RCLCPP_INFO(this->get_logger(), "Received %zu bytes from serial port.", new_data.length());
+      frame_parser_.add_data(new_data);
+    }
     
     while (auto frame = frame_parser_.parse()) {
+      // If we get here, it means parsing was successful!
+      RCLCPP_INFO(this->get_logger(), "Successfully parsed a frame!");
       auto header = create_header();
       publish_depth_image(*frame, header);
       publish_point_cloud(*frame, header);
