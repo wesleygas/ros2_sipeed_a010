@@ -12,7 +12,7 @@
 #include <termios.h>
 #include <unistd.h>
 #include <string.h>
-
+#include <iostream>
 namespace sipeed_tof
 {
 
@@ -128,6 +128,9 @@ bool SerialPort::send_command(const std::string & command, const std::string & e
       }
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
+  // Log the failure for easier debugging
+  // Note: This logging is outside a ROS node, so we use std::cerr
+  std::cerr << "Timeout or error on command: [" << command.substr(0, command.size()-1) << "]. Expected [" << expected_response.substr(0, expected_response.size()-2) << "], Got [" << response << "]" << std::endl;
   return false;
 }
 

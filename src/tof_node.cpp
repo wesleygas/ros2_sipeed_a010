@@ -27,7 +27,7 @@ public:
     if (serial_port_ && serial_port_->is_open()) {
       RCLCPP_INFO(this->get_logger(), "Stopping camera data stream...");
       // We don't need to wait for a response, just send the command.
-      serial_port_->write_string("AT+DISP=1\r");
+      serial_port_->write_string("AT+DISP=0\r");
       // Give it a moment to process
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
@@ -47,6 +47,10 @@ public:
     this->declare_parameter<std::string>("device", "/dev/ttyUSB0");
     this->declare_parameter<std::string>("frame_id", "tof_camera");
     this->declare_parameter<int>("timer_period_ms", 30);
+    this->declare_parameter<int>("binning", 1);
+    this->declare_parameter<int>("display_mode", 2);
+    this->declare_parameter<int>("fps", 10);
+    this->declare_parameter<int>("quantization_unit", 0);
 
     // Get parameters
     device_path_ = this->get_parameter("device").as_string();
@@ -73,10 +77,6 @@ public:
   }
 
 private:
-  std::thread read_thread_;
-  std::atomic<bool> is_running_{true};
-  std::mutex buffer_mutex_; // To protect the frame_parser_'s internal buffer
-  
   // New method to be run in the dedicated thread
   void serial_read_loop()
   {
@@ -109,22 +109,52 @@ private:
       RCLCPP_ERROR(this->get_logger(), "Camera not responding to AT command.");
       return false;
     }
-    serial_port_->send_command("AT+ISP=0\r", "OK\r\n");
-    serial_port_->send_command("AT+DISP=1\r", "OK\r\n");
-    serial_port_->send_command("AT+ISP=1\r", "OK\r\n");
-
+    if (!apply_camera_settings()) {
+      RCLCPP_ERROR(this->get_logger(), "Failed to apply one or more camera settings.");
+      return false;
+    }
     if (!get_camera_coefficients()) {
       return false;
     }
 
-    if (!serial_port_->send_command("AT+DISP=3\r", "OK\r\n")) {
-      RCLCPP_ERROR(this->get_logger(), "Failed to start data stream (AT+DISP=3).");
+    // Finally, start the data stream
+    RCLCPP_INFO(this->get_logger(), "Starting data stream...");
+    int display_mode = this->get_parameter("display_mode").as_int();
+    if (!serial_port_->send_command("AT+DISP=" + std::to_string(display_mode) + "\r", "OK\r\n")) {
+      return false;
+    }
+    return true;
+  }
+  bool apply_camera_settings()
+  {
+    RCLCPP_INFO(this->get_logger(), "Applying camera settings...");
+
+    // Set Binning
+    int binning = this->get_parameter("binning").as_int();
+    RCLCPP_INFO(this->get_logger(), "Setting Binning to mode %d.", binning);
+    if (!serial_port_->send_command("AT+BINN=" + std::to_string(binning) + "\r", "OK\r\n")) {
       return false;
     }
 
+    // Set FPS
+    int fps = this->get_parameter("fps").as_int();
+    RCLCPP_INFO(this->get_logger(), "Setting FPS to %d.", fps);
+    if (!serial_port_->send_command("AT+FPS=" + std::to_string(fps) + "\r", "OK\r\n")) {
+      return false;
+    }
+
+    // Set Quantization Unit
+    int unit = this->get_parameter("quantization_unit").as_int();
+    RCLCPP_INFO(this->get_logger(), "Setting Quantization Unit to %d.", unit);
+    if (!serial_port_->send_command("AT+UNIT=" + std::to_string(unit) + "\r", "OK\r\n")) {
+      return false;
+    }
+    
+    // The docs mention a 1-2 second wait after starting the ISP
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+
     return true;
   }
-
   bool get_camera_coefficients()
   {
     serial_port_->write_string("AT+COEFF?\r");
@@ -260,6 +290,9 @@ private:
   }
 
   // Member variables
+  std::thread read_thread_;
+  std::atomic<bool> is_running_{true};
+  std::mutex buffer_mutex_; // To protect the frame_parser_'s internal buffer
   std::unique_ptr<SerialPort> serial_port_;
   FrameParser frame_parser_;
   rclcpp::TimerBase::SharedPtr timer_;

@@ -4,7 +4,22 @@ sipeed_tof_node:
     device: "/dev/ttyUSB0"
     
     # The frame_id for published messages
-    frame_id: "tof_camera_link"
-    
-    # The period for the main processing timer in milliseconds
+    frame_id: "tof_camera"
+
     timer_period_ms: 30
+    
+    # --- New Camera Configuration Parameters ---
+
+    # Binning mode for resolution.
+    # 1: 100x100, 2: 50x50, 4: 25x25
+    binning: 1
+    # Display mode
+    # 0: all off, 1: LCD only, 2: usb only, 4: UART (and all binary combinations) 
+    display_mode: 2
+
+    # Frame rate in frames per second.
+    # Range: 1 to 19
+    fps: 19
+    # Quantization unit in mm. 0 is the default sqrt strategy.
+    # Range: 0 to 9
+    quantization_unit: 0
