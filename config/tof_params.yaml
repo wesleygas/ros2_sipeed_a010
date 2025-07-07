@@ -1,10 +1,10 @@
 sipeed_tof_node:
   ros__parameters:
     # The serial device path for the ToF camera
-    device: "/dev/ttyUSB0"
+    device: "/dev/serial/by-id/usb-SIPEED_SIPEED_Meta_Sense_Lite_202206_AA725F-if00-port0"
     
     # The frame_id for published messages
-    frame_id: "tof_camera"
+    frame_id: "tof_camera_optical_frame"
 
     timer_period_ms: 30
     

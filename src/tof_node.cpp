@@ -203,7 +203,7 @@ private:
     
     while (auto frame = frame_parser_.parse()) {
       // If we get here, it means parsing was successful!
-      RCLCPP_INFO(this->get_logger(), "Successfully parsed a frame!");
+      RCLCPP_DEBUG(this->get_logger(), "Successfully parsed a frame!");
       auto header = create_header();
       publish_depth_image(*frame, header);
       publish_point_cloud(*frame, header);
@@ -269,7 +269,7 @@ private:
     uint8_t* ptr = msg->data.data();
     for (uint8_t j = 0; j < rows; ++j) {
       for (uint8_t i = 0; i < cols; ++i) {
-        float z = static_cast<float>(depth_data[j * cols + i]) / 100.0f; // depth in meters
+        float z = pow(static_cast<float>(depth_data[j * cols + i])/5.1, 2) / 1000.0f; // depth in meters
         float x = (static_cast<float>(i) - u0_) * z / fx_;
         float y = (static_cast<float>(j) - v0_) * z / fy_;
         
