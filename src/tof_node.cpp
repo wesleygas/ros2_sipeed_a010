@@ -2,6 +2,7 @@
 #include "sensor_msgs/msg/image.hpp"
 #include "sensor_msgs/msg/point_cloud2.hpp"
 #include "sensor_msgs/msg/point_field.hpp"
+#include "sensor_msgs/msg/camera_info.hpp"
 #include "cv_bridge/cv_bridge.h"
 #include <opencv2/opencv.hpp>
 #include <cjson/cJSON.h>
@@ -60,6 +61,7 @@ public:
     // Initialize publishers
     depth_pub_ = this->create_publisher<sensor_msgs::msg::Image>("depth", 10);
     cloud_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("cloud", 10);
+    camera_info_pub_ = this->create_publisher<sensor_msgs::msg::CameraInfo>("depth/camera_info", 10);
 
     // Initialize camera
     if (!initialize_camera()) {
@@ -155,6 +157,57 @@ private:
 
     return true;
   }
+  void populate_camera_info_msg()
+  {
+      // This function is called once during initialization.
+      // It fills the CameraInfo message with data that does not change.
+      
+      // For now, we assume 100x100 resolution. This could be made dynamic
+      // if the binning parameter changes resolution.
+      int binning = this->get_parameter("binning").as_int();
+      int image_width = 100/binning;
+      int image_height = 100/binning;
+
+      camera_info_msg_.header.frame_id = frame_id_; // Will be updated with timestamp later
+      camera_info_msg_.width = image_width;
+      camera_info_msg_.height = image_height;
+
+      // Camera Intrinsic Matrix K = [fx 0 cx; 0 fy cy; 0 0 1]
+      camera_info_msg_.k[0] = fx_; // fx
+      camera_info_msg_.k[1] = 0.0;
+      camera_info_msg_.k[2] = u0_; // cx
+      camera_info_msg_.k[3] = 0.0;
+      camera_info_msg_.k[4] = fy_; // fy
+      camera_info_msg_.k[5] = v0_; // cy
+      camera_info_msg_.k[6] = 0.0;
+      camera_info_msg_.k[7] = 0.0;
+      camera_info_msg_.k[8] = 1.0;
+
+      // Rectification Matrix R (identity for a single camera)
+      camera_info_msg_.r[0] = 1.0;
+      camera_info_msg_.r[4] = 1.0;
+      camera_info_msg_.r[8] = 1.0;
+
+      // Projection Matrix P = [fx 0 cx Tx; 0 fy cy Ty; 0 0 1 0]
+      // For a monocular camera, Tx = Ty = 0.
+      camera_info_msg_.p[0] = fx_;
+      camera_info_msg_.p[1] = 0.0;
+      camera_info_msg_.p[2] = u0_;
+      camera_info_msg_.p[3] = 0.0;
+      camera_info_msg_.p[4] = 0.0;
+      camera_info_msg_.p[5] = fy_;
+      camera_info_msg_.p[6] = v0_;
+      camera_info_msg_.p[7] = 0.0;
+      camera_info_msg_.p[8] = 0.0;
+      camera_info_msg_.p[9] = 0.0;
+      camera_info_msg_.p[10] = 1.0;
+      camera_info_msg_.p[11] = 0.0;
+
+      // No distortion from this camera
+      camera_info_msg_.distortion_model = "plumb_bob";
+      camera_info_msg_.d.clear(); // Empty distortion vector
+  }
+
   bool get_camera_coefficients()
   {
     serial_port_->write_string("AT+COEFF?\r");
@@ -188,6 +241,7 @@ private:
     v0_ = cJSON_GetNumberValue(cJSON_GetObjectItem(cparms.get(), "v0")) / 262144.0f;
 
     RCLCPP_INFO(this->get_logger(), "Camera Coefficients: fx=%.2f, fy=%.2f, u0=%.2f, v0=%.2f", fx_, fy_, u0_, v0_);
+    populate_camera_info_msg();
     return true;
   }
 
@@ -205,6 +259,8 @@ private:
       // If we get here, it means parsing was successful!
       RCLCPP_DEBUG(this->get_logger(), "Successfully parsed a frame!");
       auto header = create_header();
+      camera_info_msg_.header.stamp = header.stamp;
+      camera_info_pub_->publish(camera_info_msg_);
       publish_depth_image(*frame, header);
       publish_point_cloud(*frame, header);
     }
@@ -295,9 +351,12 @@ private:
   std::mutex buffer_mutex_; // To protect the frame_parser_'s internal buffer
   std::unique_ptr<SerialPort> serial_port_;
   FrameParser frame_parser_;
+  sensor_msgs::msg::CameraInfo camera_info_msg_;
   rclcpp::TimerBase::SharedPtr timer_;
+
   rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr depth_pub_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr cloud_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::CameraInfo>::SharedPtr camera_info_pub_;
 
   std::string device_path_;
   std::string frame_id_;
